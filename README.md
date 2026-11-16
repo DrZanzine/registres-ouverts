@@ -57,7 +57,7 @@ Acquisition → Segmentation → Transcription (HTR) → Extraction des champs
 
 Les contributions sont bienvenues : code, relecture d'actes, retours d'archivistes, de paléographes ou de généalogistes.
 
-Toute contribution au code nécessite la signature préalable d'un **accord de contribution**, afin de garantir la cohérence des licences du projet. Ouvrez une *issue* pour en discuter.
+Les contributions au code seront ouvertes après la mise en place d’un accord de contribution.
 
 ## Licences
 
