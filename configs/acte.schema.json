@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Acte d'état civil",
+  "description": "Un acte d'état civil transcrit. Chaque champ lu sur l'image garde sa valeur brute (telle qu'écrite), sa valeur normalisée et sa confiance. null signifie « non renseigné ». Voir docs/DOCUMENT_TECHNIQUE.md, section Modèle de données.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "source",
+    "type",
+    "numero_acte",
+    "date_acte",
+    "enfant",
+    "pere",
+    "mere",
+    "temoins",
+    "mentions_marginales",
+    "controle"
+  ],
+  "properties": {
+    "id": {
+      "description": "Identifiant de l'acte, par exemple <code commune>-<type>-<année>-<numéro>.",
+      "type": ["string", "null"]
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "type": {
+      "description": "Type d'acte.",
+      "enum": ["naissance", "mariage", "deces", null]
+    },
+    "numero_acte": { "$ref": "#/$defs/entier" },
+    "date_acte": { "$ref": "#/$defs/date" },
+    "enfant": { "$ref": "#/$defs/enfant" },
+    "pere": { "$ref": "#/$defs/personne" },
+    "mere": { "$ref": "#/$defs/personne" },
+    "temoins": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/personne" }
+    },
+    "mentions_marginales": {
+      "description": "Mentions marginales : détection seulement pour l'instant, pas de transcription.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["presence"],
+      "properties": {
+        "presence": { "type": ["boolean", "null"] }
+      }
+    },
+    "controle": { "$ref": "#/$defs/controle" }
+  },
+  "$defs": {
+    "confiance": {
+      "description": "Score de confiance entre 0 et 1, null si non calculé.",
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "brut": {
+      "description": "Chaîne telle que lue sur l'image, sans correction ni normalisation.",
+      "type": ["string", "null"]
+    },
+    "texte": {
+      "description": "Champ texte lu sur l'image.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brut", "normalise", "confiance"],
+      "properties": {
+        "brut": { "$ref": "#/$defs/brut" },
+        "normalise": {
+          "description": "Valeur après application de configs/normalisation.yaml.",
+          "type": ["string", "null"]
+        },
+        "confiance": { "$ref": "#/$defs/confiance" }
+      }
+    },
+    "entier": {
+      "description": "Nombre lu sur l'image (âge, numéro d'acte), souvent écrit en toutes lettres.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brut", "normalise", "confiance"],
+      "properties": {
+        "brut": { "$ref": "#/$defs/brut" },
+        "normalise": { "type": ["integer", "null"], "minimum": 0 },
+        "confiance": { "$ref": "#/$defs/confiance" }
+      }
+    },
+    "date": {
+      "description": "Date lue sur l'image ; valeur normalisée au format AAAA-MM-JJ.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brut", "normalise", "confiance"],
+      "properties": {
+        "brut": { "$ref": "#/$defs/brut" },
+        "normalise": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "confiance": { "$ref": "#/$defs/confiance" }
+      }
+    },
+    "date_heure": {
+      "description": "Date et heure lues sur l'image ; valeur normalisée AAAA-MM-JJ ou AAAA-MM-JJTHH:MM.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brut", "normalise", "confiance"],
+      "properties": {
+        "brut": { "$ref": "#/$defs/brut" },
+        "normalise": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?$"
+        },
+        "confiance": { "$ref": "#/$defs/confiance" }
+      }
+    },
+    "sexe": {
+      "description": "Sexe lu ou déduit du texte (« enfant du sexe masculin »).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brut", "normalise", "confiance"],
+      "properties": {
+        "brut": { "$ref": "#/$defs/brut" },
+        "normalise": { "enum": ["M", "F", null] },
+        "confiance": { "$ref": "#/$defs/confiance" }
+      }
+    },
+    "personne": {
+      "description": "Père, mère ou témoin.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nom", "prenoms", "age", "profession"],
+      "properties": {
+        "nom": { "$ref": "#/$defs/texte" },
+        "prenoms": { "$ref": "#/$defs/texte" },
+        "age": { "$ref": "#/$defs/entier" },
+        "profession": { "$ref": "#/$defs/texte" }
+      }
+    },
+    "enfant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nom", "prenoms", "sexe", "date_naissance"],
+      "properties": {
+        "nom": { "$ref": "#/$defs/texte" },
+        "prenoms": { "$ref": "#/$defs/texte" },
+        "sexe": { "$ref": "#/$defs/sexe" },
+        "date_naissance": { "$ref": "#/$defs/date_heure" }
+      }
+    },
+    "source": {
+      "description": "Traçabilité : d'où vient l'acte.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["archives", "cote", "vue", "zone"],
+      "properties": {
+        "archives": {
+          "description": "Service d'archives, par exemple AD04.",
+          "type": ["string", "null"]
+        },
+        "cote": { "type": ["string", "null"] },
+        "vue": {
+          "description": "Numéro de vue de l'image.",
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "zone": {
+          "description": "Zone de l'acte dans l'image, en pixels : [x_min, y_min, x_max, y_max].",
+          "type": ["array", "null"],
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      }
+    },
+    "controle": {
+      "description": "Résultat du module check.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table_decennale", "accord_regles_llm", "confiance_htr", "statut"],
+      "properties": {
+        "table_decennale": { "enum": ["concordant", "discordant", "absent", null] },
+        "accord_regles_llm": { "$ref": "#/$defs/confiance" },
+        "confiance_htr": { "$ref": "#/$defs/confiance" },
+        "statut": { "enum": ["valide", "a_relire", null] }
+      }
+    }
+  }
+}
