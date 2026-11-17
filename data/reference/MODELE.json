@@ -1,0 +1,141 @@
+{
+  "id": null,
+  "source": {
+    "archives": null,
+    "cote": null,
+    "vue": null,
+    "zone": null
+  },
+  "type": "naissance",
+  "numero_acte": {
+    "brut": null,
+    "normalise": null,
+    "confiance": null
+  },
+  "date_acte": {
+    "brut": null,
+    "normalise": null,
+    "confiance": null
+  },
+  "enfant": {
+    "nom": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "prenoms": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "sexe": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "date_naissance": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    }
+  },
+  "pere": {
+    "nom": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "prenoms": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "age": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "profession": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    }
+  },
+  "mere": {
+    "nom": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "prenoms": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "age": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    },
+    "profession": {
+      "brut": null,
+      "normalise": null,
+      "confiance": null
+    }
+  },
+  "temoins": [
+    {
+      "nom": {
+        "brut": null,
+        "normalise": null,
+        "confiance": null
+      },
+      "prenoms": {
+        "brut": null,
+        "normalise": null,
+        "confiance": null
+      },
+      "age": {
+        "brut": null,
+        "normalise": null,
+        "confiance": null
+      },
+      "profession": {
+        "brut": null,
+        "normalise": null,
+        "confiance": null
+      }
+    },
+    {
+      "nom": {
+        "brut": null,
+        "normalise": null,
+        "confiance": null
+      },
+      "prenoms": {
+        "brut": null,
+        "normalise": null,
+        "confiance": null
+      },
+      "age": {
+        "brut": null,
+        "normalise": null,
+        "confiance": null
+      },
+      "profession": {
+        "brut": null,
+        "normalise": null,
+        "confiance": null
+      }
+    }
+  ],
+  "mentions_marginales": {
+    "presence": null
+  },
+  "controle": {
+    "table_decennale": null,
+    "accord_regles_llm": null,
+    "confiance_htr": null,
+    "statut": null
+  }
+}
