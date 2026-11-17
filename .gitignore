@@ -1,6 +1,7 @@
 # Données et modèles volumineux (jamais versionnés)
 data/raw/
 models/
+outputs/
 
 # Python
 __pycache__/
