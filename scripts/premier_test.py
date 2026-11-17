@@ -6,17 +6,18 @@ Sur quelques images de data/raw/, le script :
 
 1. segmente la page en lignes (modèle de segmentation kraken, par défaut
    celui fourni avec kraken) ;
-2. transcrit chaque ligne si un modèle de transcription est donné ;
-3. écrit dans outputs/ (non versionné), pour chaque page :
-   - ``<page>.page.xml`` : PAGE XML (lignes, et texte si transcription) ;
-   - ``<page>.txt`` : texte brut, une ligne par ligne détectée ;
-   - ``<page>.lignes.jpg`` : l'image avec les lignes détectées dessinées.
+2. transcrit chaque ligne avec chacun des modèles donnés (--rec-model,
+   répétable), la segmentation étant faite une seule fois ;
+3. écrit dans outputs/ (non versionné) :
+   - ``<page>.lignes.jpg`` : l'image avec les lignes détectées dessinées ;
+   - ``<modèle>/<page>.page.xml`` : PAGE XML avec le texte ;
+   - ``<modèle>/<page>.txt`` : texte brut, une ligne par ligne détectée.
 
 Aucune évaluation chiffrée : il s'agit seulement de voir le niveau brut.
 
 Usage :
     uv run --extra htr python scripts/premier_test.py \\
-        --rec-model models/<modele>.mlmodel [--seg-model ...] [-n 3]
+        --rec-model models/a.mlmodel [--rec-model models/b.mlmodel] [-n 3]
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import dataclasses
 import os
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -70,36 +72,51 @@ def mean_confidence(lines: list) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def process_page(path: Path, seg_model, rec_model, seg_config, rec_config, out_dir: Path) -> None:
-    """Segmente, transcrit et écrit les sorties d'une page."""
+def write_page_xml(segmentation, image: Image.Image, name: str, path: Path) -> None:
+    """Écrit une segmentation (avec ou sans texte) en PAGE XML."""
     from kraken.serialization import serialize
 
+    segmentation = dataclasses.replace(segmentation, imagename=name)
+    path.write_text(serialize(segmentation, image_size=image.size, template="pagexml"), "utf-8")
+
+
+def process_page(
+    path: Path, seg_model, rec_models: dict, seg_config, rec_config, out_dir: Path
+) -> None:
+    """Segmente une page une fois, puis la transcrit avec chaque modèle.
+
+    Sorties : ``<page>.lignes.jpg`` dans ``out_dir`` ; pour chaque modèle,
+    ``<modèle>/<page>.page.xml`` et ``<modèle>/<page>.txt``. Sans modèle de
+    transcription, ``<page>.page.xml`` (lignes seules) dans ``out_dir``.
+    """
     image = Image.open(path)
     stem = path.stem
 
     start = time.perf_counter()
     segmentation = seg_model.predict(image, seg_config)
     seg_seconds = time.perf_counter() - start
-    print(f"  {len(segmentation.lines)} lignes détectées ({seg_seconds:.0f} s)")
+    print(f"  {len(segmentation.lines)} lignes détectées ({seg_seconds:.0f} s)", flush=True)
+    draw_lines(image, segmentation.lines).save(out_dir / f"{stem}.lignes.jpg", quality=85)
 
-    lines = segmentation.lines
-    if rec_model is not None:
+    if not rec_models:
+        write_page_xml(segmentation, image, path.name, out_dir / f"{stem}.page.xml")
+        return
+
+    for name, rec_model in rec_models.items():
         start = time.perf_counter()
         lines = list(rec_model.predict(image, segmentation, rec_config))
-        segmentation = dataclasses.replace(segmentation, lines=lines)
         confidence = mean_confidence(lines)
         shown = f", confiance moyenne {confidence:.2f}" if confidence is not None else ""
-        print(f"  transcription : {time.perf_counter() - start:.0f} s{shown}")
+        print(f"  {name} : {time.perf_counter() - start:.0f} s{shown}", flush=True)
 
-    segmentation = dataclasses.replace(segmentation, imagename=path.name)
-    page_xml = serialize(segmentation, image_size=image.size, template="pagexml")
-    (out_dir / f"{stem}.page.xml").write_text(page_xml, encoding="utf-8")
-
-    if rec_model is not None:
-        text = "\n".join(line.prediction for line in lines)
-        (out_dir / f"{stem}.txt").write_text(text + "\n", encoding="utf-8")
-
-    draw_lines(image, lines).save(out_dir / f"{stem}.lignes.jpg", quality=85)
+        model_dir = out_dir / name
+        model_dir.mkdir(exist_ok=True)
+        transcribed = dataclasses.replace(segmentation, lines=lines)
+        write_page_xml(transcribed, image, path.name, model_dir / f"{stem}.page.xml")
+        # Les modèles sont entraînés en NFD : le texte brut est recomposé en NFC
+        # pour être lisible partout, sans autre modification.
+        text = "\n".join(unicodedata.normalize("NFC", line.prediction) for line in lines)
+        (model_dir / f"{stem}.txt").write_text(text + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -109,7 +126,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
     parser.add_argument("-n", "--count", type=int, default=3)
     parser.add_argument("--seg-model", type=Path, default=None, help="défaut : modèle kraken")
-    parser.add_argument("--rec-model", type=Path, default=None, help="modèle de transcription")
+    parser.add_argument(
+        "--rec-model",
+        type=Path,
+        action="append",
+        default=[],
+        help="modèle de transcription (répétable : un dossier de sortie par modèle)",
+    )
     parser.add_argument("--output", type=Path, default=Path("outputs"))
     parser.add_argument("--accelerator", default="auto", help="auto, cpu ou gpu")
     args = parser.parse_args(argv)
@@ -123,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     images = args.images or find_images(args.raw_dir, args.count)
     if not images:
         parser.error(f"aucune image trouvée dans {args.raw_dir}")
-    if args.rec_model is None:
+    if not args.rec_model:
         print("Pas de --rec-model : segmentation seule, sans transcription.", file=sys.stderr)
 
     threads = os.cpu_count() or 1
@@ -132,12 +155,12 @@ def main(argv: list[str] | None = None) -> int:
     rec_config = RecognitionInferenceConfig(**common)
 
     seg_model = SegmentationTaskModel.load_model(args.seg_model)
-    rec_model = RecognitionTaskModel.load_model(args.rec_model) if args.rec_model else None
+    rec_models = {p.stem: RecognitionTaskModel.load_model(p) for p in args.rec_model}
 
     args.output.mkdir(parents=True, exist_ok=True)
     for path in images:
-        print(path)
-        process_page(path, seg_model, rec_model, seg_config, rec_config, args.output)
+        print(path, flush=True)
+        process_page(path, seg_model, rec_models, seg_config, rec_config, args.output)
     print(f"Sorties écrites dans {args.output}/")
     return 0
 
