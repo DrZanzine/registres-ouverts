@@ -20,7 +20,7 @@ Lire un registre manuscrit par IA est devenu courant ; publier des résultats do
 | --- | --- |
 | Commune | Manosque (Alpes-de-Haute-Provence) |
 | Actes | Naissances |
-| Période | 1873 – 1882 |
+| Période | 1893 – 1902 (une décennie complète des tables décennales) |
 | Source des images | Archives départementales des Alpes-de-Haute-Provence (Licence Ouverte) |
 | Objectif | ≥ 99 % de précision sur les actes validés automatiquement ; les autres partent en relecture humaine |
 
@@ -49,7 +49,7 @@ Acquisition → Segmentation → Transcription (HTR) → Extraction des champs
 ## Feuille de route
 
 - [ ] **Jalon 0 — Cadrage** : vérification de l'existant, chaîne complète sur 20 pages, choix du moteur de transcription
-- [ ] **Jalon 1 — Prototype** : jeu de référence, banc d'essai et index des naissances de Manosque 1873-1882
+- [ ] **Jalon 1 — Prototype** : jeu de référence, banc d'essai et index des naissances de Manosque 1893-1902
 - [ ] **Jalon 2 — Partenariat** : mariages et décès, collaboration avec les Archives départementales
 - [ ] **Jalon 3 — Liens et recherche** : liens entre actes d'une même personne, recherche publique
 
