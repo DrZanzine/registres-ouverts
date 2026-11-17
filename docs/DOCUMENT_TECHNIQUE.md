@@ -1,6 +1,6 @@
 Document technique — registres-ouverts
 17 nov. 2026 · @Ziane
-La chaîne transforme des images de registres d'état civil du XIXe siècle en données structurées, vérifiables et mesurées. Chaque brique existe déjà en open source : le travail consiste à les assembler, à les adapter à un fonds réel (naissances de Manosque, 1873-1882) et à évaluer rigoureusement le résultat.
+La chaîne transforme des images de registres d'état civil du XIXe siècle en données structurées, vérifiables et mesurées. Chaque brique existe déjà en open source : le travail consiste à les assembler, à les adapter à un fonds réel (naissances de Manosque, 1893-1902, soit une décennie complète des tables décennales) et à évaluer rigoureusement le résultat.
 Architecture
 Les actes validés vont directement en base ; les autres passent par la relecture, dont les corrections réentraînent le modèle de transcription. Le module d'évaluation compare toutes les sorties au jeu de référence.
 Modules
@@ -149,7 +149,7 @@ Plan de développement du jalon 0
 Objectif fin décembre 2026 : une chaîne qui tourne de bout en bout sur 20 pages, même imparfaite.
 [ ] Créer la VM de traitement (Ubuntu, GPU en passthrough, Docker, uv, Ollama)
 [ ] Cloner le dépôt dans la VM, ajouter un CLAUDE.md local (exclu de Git), pyproject.toml, l'arborescence et la CI
-[ ] acquire : télécharger 20 pages de naissances de Manosque 1879 avec leurs références
+[ ] acquire : télécharger 20 pages de naissances de Manosque 1894 avec leurs références
 [ ] segment + transcribe : premier passage avec un modèle de base public, sans affinage
 [ ] extract : première version à base de règles, puis version LLM
 [ ] evaluate : calcul du CER et de la précision par champ sur une dizaine d'actes corrigés à la main
