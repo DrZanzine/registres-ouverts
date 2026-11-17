@@ -1,6 +1,6 @@
 Document technique — registres-ouverts
 17 nov. 2026 · @Ziane
-La chaîne transforme des images de registres d'état civil du XIXe siècle en données structurées, vérifiables et mesurées. Chaque brique existe déjà en open source : le travail consiste à les assembler, à les adapter à un fonds réel (naissances de Manosque, 1893-1902, soit une décennie complète des tables décennales) et à évaluer rigoureusement le résultat.
+La chaîne transforme des images de registres d'état civil de plus de cent ans en données structurées, vérifiables et mesurées. Chaque brique existe déjà en open source : le travail consiste à les assembler, à les adapter à un fonds réel (naissances de Manosque, 1893-1902, soit une décennie complète des tables décennales) et à évaluer rigoureusement le résultat.
 Architecture
 Les actes validés vont directement en base ; les autres passent par la relecture, dont les corrections réentraînent le modèle de transcription. Le module d'évaluation compare toutes les sorties au jeu de référence.
 Modules

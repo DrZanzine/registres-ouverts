@@ -1,7 +1,7 @@
 [project]
 name = "registres-ouverts"
 version = "0.1.0"
-description = "Outillage ouvert et banc d'essai pour la lecture automatique (HTR) et l'indexation des registres d'état civil français du XIXe siècle."
+description = "Outillage ouvert et banc d'essai pour la lecture automatique (HTR) et l'indexation des registres d'état civil français de plus de cent ans."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
