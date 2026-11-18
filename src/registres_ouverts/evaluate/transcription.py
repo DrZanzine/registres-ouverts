@@ -289,8 +289,17 @@ class CorpusResult:
         return sum((page.wer for page in self.pages), Score())
 
     def confusions(self) -> Counter[tuple[str, str]]:
-        """Confusions de caractères cumulées."""
-        return char_confusions(line.comparison for page in self.pages for line in page.lines)
+        """Confusions de caractères cumulées sur les lignes appariées.
+
+        Les lignes manquantes ou en trop sont exclues : ce ne sont pas des
+        confusions de lecture mais des erreurs de segmentation.
+        """
+        return char_confusions(
+            line.comparison
+            for page in self.pages
+            for line in page.lines
+            if line.status is LineStatus.MATCHED
+        )
 
     def to_dict(self, top_confusions: int = 20) -> dict:
         """Représentation JSON."""

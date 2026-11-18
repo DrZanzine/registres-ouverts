@@ -219,3 +219,11 @@ def test_compare_paths_errors(tmp_path: Path) -> None:
     (dup / "p.xml").write_text(page_xml([]), "utf-8")
     with pytest.raises(TranscriptionError):
         compare_paths(dup, tmp_path / "d")
+
+
+def test_confusions_ignore_missing_lines(tmp_path: Path) -> None:
+    (tmp_path / "ref.txt").write_text("nuit\nFictivard\n", "utf-8")
+    (tmp_path / "hyp.txt").write_text("uuit\n", "utf-8")
+    result = compare_paths(tmp_path / "ref.txt", tmp_path / "hyp.txt")
+    assert dict(result.confusions()) == {("n", "u"): 1}
+    assert result.cer.errors == 1 + len("Fictivard")
