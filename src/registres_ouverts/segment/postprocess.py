@@ -377,7 +377,13 @@ def find_gutter(
         runs,
         key=lambda r: (r[1] - r[0], -abs((candidates[r[0]] + candidates[r[1]]) / 2 - width / 2)),
     )
-    return (candidates[run[0]] + candidates[run[1]]) / 2.0
+    lo_x, hi_x = candidates[run[0]], candidates[run[1]]
+    # Page vide d'un côté : le pli est au bord du texte de l'autre page, pas au milieu du blanc.
+    if not any(ln.x1 <= lo_x for ln in lines):
+        return hi_x
+    if not any(ln.x0 >= hi_x for ln in lines):
+        return lo_x
+    return (lo_x + hi_x) / 2.0
 
 
 @dataclass
