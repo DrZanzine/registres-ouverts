@@ -82,8 +82,9 @@ class PostprocessConfig:
     # Page vide : moins de lignes conservées que ce nombre.
     empty_page_max_lines: int = 2
 
-    # Colonne du corps : lignes « longues » = plus larges que cette fraction de la page.
-    long_line_page_ratio: float = 0.35
+    # Colonne du corps : lignes « longues » = plus larges que cette fraction de la largeur de
+    # référence de la page (9e décile des largeurs de ses lignes).
+    long_line_ratio: float = 0.6
     # Nombre minimal de lignes longues pour estimer la colonne du corps.
     min_long_lines: int = 3
     # Tolérance (en h) autour du mode des débuts de lignes pour l'ajustement du bord gauche.
@@ -109,6 +110,8 @@ class PostprocessConfig:
     start_indent_h: float = 1.0
     start_width_ratio: float = 0.5
     start_next_s: float = 1.6
+    # Largeur au-delà de laquelle un morceau à gauche sur la même bande interdit un début d'acte.
+    start_left_neighbour_h: float = 3.0
     # Suite du texte d'un acte : interligne au plus next_line_s * s (ou missing_line_s * s pour
     # une ligne pleine, au cas où une ligne manquerait à la segmentation).
     next_line_s: float = 1.35
@@ -419,10 +422,12 @@ def find_body_column(
     Le bord gauche est le mode (par classes de largeur ``h``) des débuts de lignes longues,
     affiné par une droite ``x = a + b·y`` (la page peut être légèrement inclinée ou bombée).
     """
-    page_w = page_x1 - page_x0
-    longs = [
-        ln for ln in lines if not ln.vertical and ln.width >= cfg.long_line_page_ratio * page_w
-    ]
+    flat = [ln for ln in lines if not ln.vertical]
+    if not flat:
+        return None
+    widths = sorted(ln.width for ln in flat)
+    ref = widths[int(0.9 * (len(widths) - 1))]
+    longs = [ln for ln in flat if ln.width >= cfg.long_line_ratio * ref]
     if len(longs) < cfg.min_long_lines:
         return None
     bins: dict[int, int] = {}
@@ -625,6 +630,16 @@ class _PageAnalyzer:
         if self.indent(ln) < cfg.start_indent_h * self.h:
             return False
         if ln.x1 - ln.x0 < cfg.start_width_ratio * col.width:
+            return False
+        # Un fragment précédé, sur la même bande, d'un morceau de texte n'est pas un début d'acte
+        # (cas de l'en-tête imprimé émietté). Une petite initiale ornée isolée est tolérée.
+        if any(
+            c is not ln
+            and c.x1 <= ln.x0 + self.h
+            and c.width > cfg.start_left_neighbour_h * self.h
+            and abs(vertical_gap(ln, c)) < cfg.same_band_s * s
+            for c in body
+        ):
             return False
         below = [c for c in body if c is not ln and vertical_gap(ln, c) > cfg.same_band_s * s]
         if not below:
