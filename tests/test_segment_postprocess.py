@@ -22,6 +22,8 @@ from registres_ouverts.segment.postprocess import (
     polygon_area,
     postprocess,
     postprocess_lines,
+    stroke_features,
+    stroke_verdict,
 )
 
 H = 40  # hauteur fictive d'une ligne
@@ -259,3 +261,121 @@ def test_cli(tmp_path, capsys) -> None:
     out = json.loads(dst.read_text("utf-8"))
     assert len(out["lignes"]) == len(fake_double_page())
     assert "4 acte(s)" in capsys.readouterr().err
+
+
+# --- seconde passe : signatures, marge disputée, traits -----------------------------------------
+
+
+def test_signatures_after_short_line_are_not_body() -> None:
+    """Après « … lecture faite » (ligne courte), des signatures alignées à gauche et dont la
+    rangée atteint le bord droit restent des signatures ; un morceau décalé vers le bas sur la
+    bande de la dernière ligne aussi."""
+    act, _ = fake_act("g1", 100, body_x0=450, body_x1=1380, margin_x0=150)
+    last_y = 100 + 10 * S
+    sig_y = last_y + 1.3 * S
+    act = [ln for ln in act if "-sig-" not in ln["id"]]
+    act += [
+        fake_line(460, 900, sig_y, height=55, name="g1-sig-gauche"),
+        fake_line(930, 1375, sig_y - 5, height=55, name="g1-sig-droite"),
+        fake_line(760, 830, last_y + 0.45 * S, name="g1-sig-collee"),
+    ]
+    page_droite, _ = fake_act("d1", 100, body_x0=1700, body_x1=2650, margin_x0=1460)
+    zones = {ln["id"]: ln["zone"] for ln in postprocess_lines(act + page_droite, SIZE).lines}
+    assert zones["fictif-g1-corps-10"] == "corps"
+    assert zones["fictif-g1-sig-gauche"] == "signature"
+    assert zones["fictif-g1-sig-droite"] == "signature"
+    assert zones["fictif-g1-sig-collee"] == "signature"
+
+
+def test_contested_margin_lines() -> None:
+    """Juste au-dessus du début de l'acte 2 : un « N° » collé au nom qui le suit va à l'acte 2 ;
+    une signature de marge collée à la marge de l'acte 1 reste à l'acte 1."""
+    raw = fake_double_page()
+    start = by_id(raw)["fictif-g2-corps-00"]
+    y = start["baseline"][0][1]
+    nom = by_id(raw)["fictif-g2-marge-nom"]
+    # Le « N° » de l'acte 2 est remonté juste au-dessus de sa première ligne, collé au nom.
+    raw.remove(by_id(raw)["fictif-g2-marge-numero"])
+    nom_y = y + 0.5 * S
+    raw[raw.index(nom)] = fake_line(150, 390, nom_y, name="g2-marge-nom")
+    raw.append(fake_line(160, 260, nom_y - H - 2, name="g2-marge-numero"))
+    # Signature dans la marge de la page droite, collée à une ligne de marge de l'acte d1.
+    start_d = by_id(raw)["fictif-d2-corps-00"]
+    yd = start_d["baseline"][0][1]
+    # Comme souvent, le « N° » de l'acte d2 est un peu sous sa première ligne.
+    num = by_id(raw)["fictif-d2-marge-numero"]
+    raw[raw.index(num)] = fake_line(1460, 1550, yd + 1.5 * S, name="d2-marge-numero")
+    raw.append(fake_line(1460, 1640, yd - 1.6 * S, name="d1-marge-mention"))
+    raw.append(fake_line(1460, 1640, yd - 0.1 * S, height=70, name="d1-marge-signature"))
+    acts = {ln["id"]: ln["acte"] for ln in postprocess_lines(raw, SIZE).lines}
+    assert acts["fictif-g2-marge-numero"] == 2
+    assert acts["fictif-d1-marge-mention"] == 3
+    assert acts["fictif-d1-marge-signature"] == 3
+    assert acts["fictif-d2-marge-numero"] == 4
+
+
+def test_reading_order_of_tight_small_lines() -> None:
+    """Petites lignes serrées (mentions marginales) : lues de haut en bas, pas par x."""
+    raw = fake_double_page()
+    raw += [
+        fake_line(170, 380, 330, height=18, name="g1-mention-a"),
+        fake_line(150, 380, 349, height=18, name="g1-mention-b"),
+        fake_line(165, 380, 368, height=18, name="g1-mention-c"),
+    ]
+    ids = [ln["id"] for ln in postprocess_lines(raw, SIZE).lines]
+    pos = [ids.index(f"fictif-g1-mention-{k}") for k in "abc"]
+    assert pos == sorted(pos)
+
+
+def _canvas(width: int, height: int) -> list[list[int]]:
+    return [[230] * width for _ in range(height)]
+
+
+def test_stroke_features_bar_vs_letters() -> None:
+    """Un trait horizontal est un trait ; des jambages verticaux répétés sont du texte."""
+    box = [[0, 0], [120, 0], [120, 40], [0, 40]]
+    bar = _canvas(120, 40)
+    for y in (24, 25, 26):
+        for x in range(10, 110):
+            bar[y][x] = 20
+    feats = stroke_features(bar, box, (0, 0), h=40)
+    assert feats is not None and stroke_verdict(feats) == "trait"
+    letters = _canvas(120, 40)
+    for x0 in range(10, 110, 8):
+        for y in range(8, 34):
+            letters[y][x0] = letters[y][x0 + 1] = 20
+        for x in range(x0, x0 + 6):
+            letters[8][x] = letters[33][x] = 20
+    feats = stroke_features(letters, box, (0, 0), h=40)
+    assert feats is not None and stroke_verdict(feats) is None
+
+
+def test_strokes_rejected_with_pixel_source() -> None:
+    """Avec une source de pixels, un petit trait de marge est rejeté (raison « trait ») ; sans
+    elle, il est gardé. Les identifiants des autres lignes ne changent pas."""
+    raw = fake_double_page()
+    raw.append(fake_line(200, 300, 600, height=30, name="paraphe"))
+    stroke_rows = range(588, 592)
+
+    def pixels(bbox: tuple[int, int, int, int]) -> list[list[int]]:
+        x0, y0, x1, y1 = bbox
+        out = _canvas(x1 - x0, y1 - y0)
+        if (x0, x1) == (200, 300):
+            for y in stroke_rows:
+                if y0 <= y < y1:
+                    out[y - y0] = [20] * (x1 - x0)
+        else:  # texte fictif : jambages réguliers, coupés en deux (deux passages par colonne)
+            mid = len(out) // 2
+            for k, row in enumerate(out[2:-2], start=2):
+                if abs(k - mid) > 2:
+                    for x in range(0, x1 - x0, 6):
+                        row[x] = 20
+        return out
+
+    with_px = postprocess_lines(raw, SIZE, pixels=pixels)
+    assert ("fictif-paraphe", "trait") in [(r["id"], r["raison"]) for r in with_px.rejected]
+    without = postprocess_lines(raw, SIZE)
+    assert "fictif-paraphe" in by_id(without.lines)
+    assert {ln["id"] for ln in with_px.lines} == {ln["id"] for ln in without.lines} - {
+        "fictif-paraphe"
+    }
