@@ -37,7 +37,7 @@ from __future__ import annotations
 import copy
 import math
 import statistics
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,6 +52,7 @@ ZONE_OTHER = "autre"
 REASON_FRAGMENT = "fragment"
 REASON_EMPTY_PAGE = "page_vide"
 REASON_TRIMMED = "rognure_debordement"
+REASON_STROKE = "trait"
 
 
 @dataclass(frozen=True)
@@ -118,13 +119,37 @@ class PostprocessConfig:
     missing_line_s: float = 2.6
     # Fragments d'une même ligne visuelle : écart de ligne de base < same_band_s * s.
     same_band_s: float = 0.5
-    # Écart horizontal maximal entre deux morceaux d'une même ligne de texte.
+    # Écart horizontal maximal entre deux morceaux d'une même ligne de texte, et écart vertical
+    # maximal entre leurs lignes de base (un morceau plus décalé est une signature).
     chain_gap_h: float = 1.0
+    chain_band_s: float = 0.3
     # En-tête : bloc d'au moins header_min_split_bands bandes faites de plusieurs fragments.
     header_min_split_bands: int = 2
     # Rattachement d'une ligne de marge à un acte : son centre est sous
     # (haut de la première ligne de l'acte - margin_attach_h * h).
     margin_attach_h: float = 0.5
+    # Lignes de marge « disputées » entre deux actes : celles dont le centre est à moins de
+    # margin_contest_h * h au-dessus de la ligne de base du début de l'acte suivant. Elles vont
+    # à l'acte de leur plus proche voisine de marge (au-dessus ou au-dessous).
+    margin_contest_h: float = 3.0
+    # Ordre de lecture : deux lignes sont sur la même bande si leurs lignes de base sont à moins
+    # de order_band_ratio fois la plus petite de leurs hauteurs (petites écritures serrées).
+    order_band_ratio: float = 0.5
+
+    # Traits de plume et paraphes (seulement si l'appelant fournit les pixels, voir
+    # ``postprocess_lines``) ; mesurés sur les lignes de moins de trait_max_width_h * h de large.
+    # vr = nombre moyen de passages encre/papier par colonne (1 = un seul trait horizontal),
+    # rows = hauteur encrée en h, hr = passages par ligne de pixels par h de largeur.
+    trait_max_width_h: float = 6.5
+    # Rejet : un seul trait par colonne, peu haut.
+    trait_max_vr: float = 1.03
+    trait_max_rows_h: float = 1.2
+    # Doute (zone « autre », pas de rejet) : presque un seul trait, très peu haut, peu de lettres.
+    doubt_max_vr: float = 1.08
+    doubt_max_rows_h: float = 0.65
+    doubt_max_hr: float = 1.4
+    # Seuil d'encre : pixel plus sombre que ink_ratio fois la médiane de la ligne.
+    ink_ratio: float = 0.6
 
 
 DEFAULT_CONFIG = PostprocessConfig()
@@ -215,6 +240,96 @@ def clip_polyline_x(
         if ok:
             out.append(cur)
     return [[round(p[0]), round(p[1])] for p in out]
+
+
+def polygon_mask(points: Sequence[Sequence[float]], width: int, height: int) -> list[list[bool]]:
+    """Masque d'un polygone (coordonnées relatives au coin du rectangle) par balayage de lignes."""
+    pts = [(float(p[0]), float(p[1])) for p in points]
+    edges = list(zip(pts, pts[1:] + pts[:1], strict=True))
+    mask = [[False] * width for _ in range(height)]
+    for y in range(height):
+        yc = y + 0.5
+        xs = sorted(
+            a[0] + (yc - a[1]) * (b[0] - a[0]) / (b[1] - a[1])
+            for a, b in edges
+            if (a[1] <= yc < b[1]) or (b[1] <= yc < a[1])
+        )
+        row = mask[y]
+        for x_in, x_out in zip(xs[::2], xs[1::2], strict=False):
+            for x in range(max(0, math.ceil(x_in - 0.5)), min(width, math.floor(x_out - 0.5) + 1)):
+                row[x] = True
+    return mask
+
+
+@dataclass(frozen=True)
+class StrokeFeatures:
+    """Mesures d'encre d'une ligne (voir :class:`PostprocessConfig`, section traits)."""
+
+    vertical_runs: float
+    ink_rows_h: float
+    horizontal_runs_h: float
+
+
+def stroke_features(
+    gray: Sequence[Sequence[int]],
+    boundary: Sequence[Sequence[float]],
+    origin: tuple[int, int],
+    h: float,
+    ink_ratio: float = 0.6,
+) -> StrokeFeatures | None:
+    """Mesure la « texture » de l'encre d'une ligne.
+
+    :param gray: niveaux de gris (0 = noir) du rectangle englobant, ligne par ligne.
+    :param boundary: polygone de la ligne en coordonnées page.
+    :param origin: coin haut-gauche ``(x0, y0)`` du rectangle dans la page.
+    :param h: hauteur médiane des lignes de la vue.
+    :returns: ``None`` si le polygone ne couvre aucun pixel.
+
+    Un trait de plume horizontal (souligné, accolade, paraphe) ne croise chaque colonne qu'une
+    fois et n'occupe que quelques rangées ; l'écriture croise plusieurs fois et occupe la hauteur
+    d'une ligne.
+    """
+    height = len(gray)
+    width = len(gray[0]) if height else 0
+    if not width:
+        return None
+    rel = [(p[0] - origin[0], p[1] - origin[1]) for p in boundary]
+    mask = polygon_mask(rel, width, height)
+    values = sorted(gray[y][x] for y in range(height) for x in range(width) if mask[y][x])
+    if not values:
+        return None
+    threshold = values[len(values) // 2] * ink_ratio
+    ink = [[mask[y][x] and gray[y][x] < threshold for x in range(width)] for y in range(height)]
+    row_runs = ink_rows = 0
+    for row in ink:
+        runs = sum(1 for x in range(width) if row[x] and (x == 0 or not row[x - 1]))
+        if runs:
+            ink_rows += 1
+            row_runs += runs
+    col_runs = ink_cols = 0
+    for x in range(width):
+        runs = sum(1 for y in range(height) if ink[y][x] and (y == 0 or not ink[y - 1][x]))
+        if runs:
+            ink_cols += 1
+            col_runs += runs
+    return StrokeFeatures(
+        vertical_runs=col_runs / max(ink_cols, 1),
+        ink_rows_h=ink_rows / h,
+        horizontal_runs_h=row_runs / max(ink_rows, 1) / (width / h),
+    )
+
+
+def stroke_verdict(features: StrokeFeatures, cfg: PostprocessConfig = DEFAULT_CONFIG) -> str | None:
+    """``"trait"`` (à rejeter), ``"doute"`` (à classer « autre ») ou ``None`` (texte)."""
+    if features.vertical_runs <= cfg.trait_max_vr and features.ink_rows_h <= cfg.trait_max_rows_h:
+        return "trait"
+    if (
+        features.vertical_runs <= cfg.doubt_max_vr
+        and features.ink_rows_h <= cfg.doubt_max_rows_h
+        and features.horizontal_runs_h <= cfg.doubt_max_hr
+    ):
+        return "doute"
+    return None
 
 
 # --------------------------------------------------------------------------------------------
@@ -460,15 +575,28 @@ def find_body_column(
     return BodyColumn(left=a, slope=b, right=float(right))
 
 
-def group_bands(lines: Sequence[Line], tol: float) -> list[list[Line]]:
+def group_bands(
+    lines: Sequence[Line], tol: float, thickness_ratio: float | None = None
+) -> list[list[Line]]:
     """Regroupe des lignes en bandes horizontales (même ligne visuelle), triées de haut en bas,
-    chaque bande triée de gauche à droite."""
+    chaque bande triée de gauche à droite.
+
+    Deux lignes sont sur la même bande si l'écart de leurs lignes de base est inférieur à ``tol``,
+    et, si ``thickness_ratio`` est donné, à ``thickness_ratio`` fois la plus mince des deux
+    (petites écritures serrées des mentions marginales).
+    """
     bands: list[list[Line]] = []
+
+    def limit(a: Line, b: Line) -> float:
+        if thickness_ratio is None:
+            return tol
+        return min(tol, thickness_ratio * min(a.thickness, b.thickness))
+
     for ln in sorted(lines, key=lambda ln: ln.cy):
         placed = False
         for band in reversed(bands[-3:]):
             ref = min(band, key=lambda b: abs(vertical_gap(b, ln)))
-            if abs(vertical_gap(ref, ln)) < tol:
+            if abs(vertical_gap(ref, ln)) < limit(ref, ln):
                 band.append(ln)
                 placed = True
                 break
@@ -530,6 +658,7 @@ class _PageAnalyzer:
         self.h = h
         self.s_hint = s
         self.layout = PageLayout(index=index, x0=x0, x1=x1, column=None)
+        self.s = s or h
         self.lines = lines
 
     # -- colonne et débordements ---------------------------------------------------------------
@@ -623,7 +752,11 @@ class _PageAnalyzer:
             return None
         cur_full = self.full(current)
         nxt_full = self.full(nxt) or any(self.full(c) for c in self.chained_right(nxt, band))
-        if gap <= cfg.next_line_s * s and (cur_full or nxt_full):
+        if gap <= cfg.next_line_s * s and cur_full:
+            return nxt
+        # Après une ligne courte (« … lecture faite »), seule une ligne pleine par elle-même
+        # continue le texte : des signatures voisines ne doivent pas la rendre « pleine ».
+        if gap <= cfg.next_line_s * s and self.full(nxt):
             return nxt
         if gap <= cfg.missing_line_s * s and nxt_full and cur_full:
             return nxt
@@ -669,10 +802,51 @@ class _PageAnalyzer:
         for c in sorted(band, key=lambda c: c.x0):
             if c is row or c.x0 < row.x0:
                 continue
+            if abs(vertical_gap(row, c)) > self.cfg.chain_band_s * self.s:
+                continue
             if c.x0 - edge <= self.cfg.chain_gap_h * self.h:
                 out.append(c)
                 edge = max(edge, c.x1)
         return out
+
+    def resolve_contested_margin(
+        self, margin: Sequence[Line], acts: Sequence[Act], owner: dict[int, Act | None]
+    ) -> None:
+        """Départage les lignes de marge situées entre deux actes.
+
+        Juste au-dessus du début d'un acte, la marge peut porter le « N° » de cet acte ou une
+        signature de l'acte précédent. Chaque ligne disputée suit sa plus proche voisine de marge
+        (chevauchement horizontal requis), traitée de bas en haut ; à écart égal, l'acte suivant.
+        """
+        cfg, h = self.cfg, self.h
+        for prev, act in zip(acts, acts[1:], strict=False):
+            if act.start is None:
+                continue
+            level = act.start.y_at(act.start.x0)
+            contested = [
+                ln
+                for ln in margin
+                if level - cfg.margin_contest_h * h <= (ln.y0 + ln.y1) / 2.0 < level
+                and owner.get(id(ln)) in (prev, act)
+            ]
+            for ln in sorted(contested, key=lambda ln: -ln.cy):
+                others = [
+                    o
+                    for o in margin
+                    if o is not ln
+                    and min(o.x1, ln.x1) > max(o.x0, ln.x0)
+                    and owner.get(id(o)) in (prev, act)
+                ]
+                above = [o for o in others if o.cy < ln.cy]
+                below = [o for o in others if o.cy > ln.cy]
+                gap_above = min((ln.y0 - o.y1 for o in above), default=math.inf)
+                gap_below = min((o.y0 - ln.y1 for o in below), default=math.inf)
+                if not above or gap_below <= gap_above:
+                    best = min(below, key=lambda o: o.y0 - ln.y1) if below else None
+                else:
+                    best = max(above, key=lambda o: o.y1)
+                if best is not None:
+                    owner[id(ln)] = owner[id(best)]
 
     def analyze(self) -> PageLayout:
         cfg, h = self.cfg, self.h
@@ -754,12 +928,17 @@ class _PageAnalyzer:
                 layout.other.append(ln)
 
         # Marge et lignes tournées : rattachées à l'acte dont le début est au-dessus.
-        for ln in sorted(margin + rotated, key=lambda ln: ln.cy):
+        owner: dict[int, Act | None] = {}
+        for ln in margin + rotated:
             centre = (ln.y0 + ln.y1) / 2.0
             target = None
             for act in acts:
                 if centre >= act.top - cfg.margin_attach_h * h:
                     target = act
+            owner[id(ln)] = target
+        self.resolve_contested_margin(margin, acts, owner)
+        for ln in sorted(margin + rotated, key=lambda ln: ln.cy):
+            target = owner[id(ln)]
             if target is None:
                 layout.other.append(ln)
             elif ln.vertical:
@@ -775,8 +954,8 @@ class _PageAnalyzer:
 # --------------------------------------------------------------------------------------------
 
 
-def _ordered(lines: Sequence[Line], tol: float) -> list[Line]:
-    return [ln for band in group_bands(lines, tol) for ln in band]
+def _ordered(lines: Sequence[Line], tol: float, ratio: float) -> list[Line]:
+    return [ln for band in group_bands(lines, tol, ratio) for ln in band]
 
 
 @dataclass
@@ -819,16 +998,24 @@ def split_pages(
     return pages
 
 
+PixelSource = Callable[[tuple[int, int, int, int]], Sequence[Sequence[int]]]
+
+
 def postprocess_lines(
     raw_lines: Sequence[dict[str, Any]],
     size: Sequence[int],
     cfg: PostprocessConfig = DEFAULT_CONFIG,
+    pixels: PixelSource | None = None,
 ) -> PostprocessResult:
     """Post-traite une liste de lignes kraken.
 
     :param raw_lines: lignes au format ``segmentation_brute.json`` (``id``, ``baseline``,
         ``boundary`` ; les autres champs sont recopiés).
     :param size: taille de l'image ``[largeur, hauteur]``.
+    :param pixels: facultatif ; fonction qui renvoie les niveaux de gris (0 = noir) d'un
+        rectangle ``(x0, y0, x1, y1)`` de l'image, ligne par ligne. Si elle est fournie, les
+        petites lignes sont examinées : un trait de plume est rejeté (raison ``trait``), une ligne
+        douteuse est classée ``autre``. Sans elle, ce test est sauté.
     :returns: lignes conservées triées par ``ordre`` (avec ``ordre``, ``zone``, ``acte``,
         ``bbox``, ``page``), lignes rejetées (avec ``raison``) et pages.
     """
@@ -848,6 +1035,28 @@ def postprocess_lines(
             rejected.append((ln, reason))
         else:
             kept.append(ln)
+
+    doubtful: set[int] = set()
+    if pixels is not None:
+        still: list[Line] = []
+        for ln in kept:
+            verdict = None
+            if not ln.vertical and ln.width <= cfg.trait_max_width_h * h:
+                feats = stroke_features(
+                    pixels((ln.x0, ln.y0, ln.x1, ln.y1)),
+                    ln.boundary,
+                    (ln.x0, ln.y0),
+                    h,
+                    cfg.ink_ratio,
+                )
+                verdict = stroke_verdict(feats, cfg) if feats else None
+            if verdict == "trait":
+                rejected.append((ln, REASON_STROKE))
+                continue
+            if verdict == "doute":
+                doubtful.add(id(ln))
+            still.append(ln)
+        kept = still
 
     pages = split_pages(kept, width, height, h, cfg)
     names = ["gauche", "droite"] if len(pages) == 2 else ["unique"]
@@ -878,7 +1087,7 @@ def postprocess_lines(
     act_no = 0
     tol = cfg.same_band_s * h
     for layout in layouts:
-        for ln in _ordered(layout.header, tol):
+        for ln in _ordered(layout.header, tol, cfg.order_band_ratio):
             ln.zone, ln.act = ZONE_HEADER, None
             ordered.append(ln)
         for act in layout.acts:
@@ -889,10 +1098,10 @@ def postprocess_lines(
                 (act.body, ZONE_BODY),
                 (act.signatures, ZONE_SIGNATURE),
             ):
-                for ln in _ordered(group, tol):
-                    ln.zone, ln.act = zone, act_no
+                for ln in _ordered(group, tol, cfg.order_band_ratio):
+                    ln.zone, ln.act = (ZONE_OTHER if id(ln) in doubtful else zone), act_no
                     ordered.append(ln)
-        for ln in _ordered(layout.other, tol):
+        for ln in _ordered(layout.other, tol, cfg.order_band_ratio):
             ln.zone, ln.act = ZONE_OTHER, None
             ordered.append(ln)
 
@@ -931,13 +1140,18 @@ def _export(ln: Line, rank: int, page_names: Sequence[str]) -> dict[str, Any]:
     return item
 
 
-def postprocess(data: dict[str, Any], cfg: PostprocessConfig = DEFAULT_CONFIG) -> dict[str, Any]:
+def postprocess(
+    data: dict[str, Any],
+    cfg: PostprocessConfig = DEFAULT_CONFIG,
+    pixels: PixelSource | None = None,
+) -> dict[str, Any]:
     """Post-traite un document ``segmentation_brute.json`` et renvoie ``segmentation.json``.
 
     Les clés du document d'entrée sont recopiées ; ``lignes`` est remplacé par les lignes
-    conservées, et ``rejetees`` et ``pages`` sont ajoutés.
+    conservées, et ``rejetees`` et ``pages`` sont ajoutés. ``pixels`` : voir
+    :func:`postprocess_lines`.
     """
-    result = postprocess_lines(data.get("lignes", []), data["taille"], cfg)
+    result = postprocess_lines(data.get("lignes", []), data["taille"], cfg, pixels)
     out = {k: copy.deepcopy(v) for k, v in data.items() if k != "lignes"}
     out["lignes"] = result.lines
     out["rejetees"] = result.rejected
